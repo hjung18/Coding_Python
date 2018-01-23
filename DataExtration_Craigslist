@@ -1,0 +1,78 @@
+import scrapy
+import re
+from scrapy import Request
+# starting URL to extract
+class RentsSpider(scrapy.Spider):
+    name = "rents"
+    allowed_domains = ["craigslist.org"]
+    start_urls = ["https://syracuse.craigslist.org/search/apa"]
+# extract from the listing
+    def parse(self, response):
+        rents = response.xpath('//p[@class="result-info"]')
+        for rent in rents:
+            relative_url = rent.xpath('a/@href').extract_first()
+            absolute_url = response.urljoin(relative_url)
+            title = rent.xpath('a/text()').extract_first()
+            address = rent.xpath('span[@class="result-meta"]/span[@class="result-hood"]/text()').extract_first("")[2:-1]
+            price = rent.xpath('span[@class="result-meta"]/span[@class="result-price"]/text()').extract_first()
+            yield Request(absolute_url, callback=self.parse_page, meta={'URL': absolute_url, 'Title': title,'Address':address, 'Price':price})
+# go to next listing
+        relative_next_url = response.xpath('//a[@class="button next"]/@href').extract_first()
+        absolute_next_url = "https://syracuse.craigslist.org/search/apa" + relative_next_url
+        yield Request(absolute_next_url, callback=self.parse)
+# extracting from each post
+    def parse_page(self, response):
+        space_ft2 = response.xpath('//*[@class="shared-line-bubble"][2]/b/text()').extract_first()
+        bedroom = response.xpath('//*[@class="shared-line-bubble"]/b[1]/text()').extract_first()
+        bathroom = response.xpath('//*[@class="shared-line-bubble"]/b[2]/text()').extract_first()
+        furnished = response.xpath('//*[@class="attrgroup"][2]/span[text()[contains(.,"furnished")]]/text()').extract_first()
+        laundry = response.xpath(
+            '//*[@class="attrgroup"][2]/span[text()[contains(.,"laundry in bldg")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"laundry on site")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"w/d in unit")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"w/d hookups")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"no laundry on site")]]/text()'
+            ).extract_first()
+        housing_type = response.xpath(
+            '//*[@class="attrgroup"][2]/span[text()[contains(.,"apartment")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"condo")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"cottage/cabin")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"duplex")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"flat")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"house")]]/text() \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"in-law")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"loft")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"townhouse")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"manufactured")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"assisted living")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"land")]]/text()'
+            ).extract_first()
+        parking = response.xpath(
+            '//*[@class="attrgroup"][2]/span[text()[contains(.,"carport")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"attached garage")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"detached garage")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"off-street parking")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"street parking")]]/text() \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"valet parking")]]/text()| \
+            //*[@class="attrgroup"][2]/span[text()[contains(.,"no parking")]]/text()'
+            ).extract_first()
+        date = response.xpath('//*[@id="display-date"]/time[@class="date timeago"]/text()').extract_first()[21:31]
+# fetch data extracted from listing
+        url = response.meta.get('URL')
+        title = response.meta.get('Title')
+        price = response.meta.get('Price')
+        address = response.meta.get('Address')
+        yield{
+            'Title': title,
+            'URL': url,
+            'Address': address,
+            'Date': date,
+            'Price': re.findall(r"[-+]?\d*\.\d+|\d+", price),
+            'Space Ft2': space_ft2,
+            'Bedroom': re.findall(r"[-+]?\d*\.\d+|\d+", bedroom),
+            'Bathroom': re.findall(r"[-+]?\d*\.\d+|\d+", bathroom),
+            'Furnished': furnished,
+            'Laundry': laundry,
+            'Housing Type': housing_type,
+            'Parking': parking
+        }
